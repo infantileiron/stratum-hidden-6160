@@ -14,6 +14,12 @@ class RenameDataset(InputModel):
 class StateModelInput(InputModel):
  name:str=Field(min_length=2,max_length=100)
  model_json:str=Field(min_length=2,max_length=15000)
+class ModelFitInput(InputModel):
+ dataset_id:str
+ source_model_id:str
+ holdout_boreholes:list[str]=Field(min_length=1,max_length=8)
+class RegisterFitInput(InputModel):
+ name:str=Field(min_length=2,max_length=100)
 class SequenceStudyInput(InputModel):
  name:str=Field(min_length=2,max_length=100)
  dataset_id:str

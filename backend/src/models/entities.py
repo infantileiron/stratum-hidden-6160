@@ -8,6 +8,16 @@ class BoreholeDataset:
  rows:list[dict]
  created_at:str=''
 @dataclass
+class ModelFit:
+ id:str
+ dataset_id:str
+ source_model_id:str
+ holdout_boreholes:list[str]
+ train_boreholes:list[str]
+ status:str
+ iterations:list[dict]=field(default_factory=list)
+ created_at:str=''
+@dataclass
 class StateModel:
  id:str
  name:str

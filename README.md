@@ -6,7 +6,7 @@
 
 上游 `shenxi_logs_202611.csv` 为SX-01/02/03三孔各160点模拟测井。团队原用表格逐点硬阈值划分，噪声造成状态跳变、点态概率与全路径被混为一谈、缺采样后直接串链。本工程替代完整性核查、模型登记/命名修订、孔段与模型快照、异步解码和复核；下游地研档案组读取批准的模型状态序列CSV。输出是给定模型下隐状态，不是真实地层或地质安全判断。
 
-BoreholeDataset测井、StateModel人工配置模型、SequenceStudy锁定孔段、DecodeRun运行、LayerReview复核、Report报告六实体贯穿。六页：孔段档案、完整测井、状态模型、锁定与解码、后验与路径、地学复核，另有登录。两页复用BoreholeTrack、SequenceSummary、ModelMatrix。
+BoreholeDataset测井、StateModel人工配置模型、SequenceStudy锁定孔段、DecodeRun运行、LayerReview复核、Report报告六实体贯穿。七页：孔段档案、完整测井、状态模型、拟合与留出、锁定与解码、后验与路径、地学复核，另有登录。两页复用BoreholeTrack、SequenceSummary、ModelMatrix。
 
 ## 快速启动
 
@@ -20,9 +20,9 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 | 角色 / 账号 | 页面 | 权限与典型动作 |
 |---|---|---|
-| admin@shenxi.test / 孔段复核地学编辑 | 六页与审计 | 读写、批准/退回、核查模型状态解释 |
-| analyst@shenxi.test / 测井序列分析员 | 测井、模型、研究、结果、复核 | 导入、配置/修订模型、运行、提审、生成批准报告 |
-| viewer@shenxi.test / 地研档案阅览员 | 六页只读 | 查看与下载已批准CSV |
+| admin@shenxi.test / 孔段复核地学编辑 | 七页与审计 | 读写、批准/退回、核查模型状态解释 |
+| analyst@shenxi.test / 测井序列分析员 | 测井、模型、拟合、研究、结果、复核 | 导入、配置/修订模型、运行、提审、生成批准报告 |
+| viewer@shenxi.test / 地研档案阅览员 | 七页只读 | 查看与下载已批准CSV |
 
 演示密码均为 `Stratum2026!`。PBKDF2密码、HS256 JWT、角色依赖、actor审计、全局错误恢复与最多10个排队/运行任务。默认密钥与账号仅供本地演示。
 
@@ -43,7 +43,7 @@ CSV列borehole,depth_m,value，truth可选且仅作模拟参考。孔ID为1—30
 
 模型JSON为states:[{id,name,mean,variance}]、initial数组、transition二维数组。K=2—4，ID唯一，人工名称1—30字，均值有限且绝对值≤1e6，方差在[1e-8,1e8]且为正。初始与转移每行概率有限、[0,1]、行和在1e-10内为1；仅在这个浮点容差内按行和规范化。允许精确0，用−∞计算，不加平滑伪计数。配置状态顺序决定索引与同分优先级。
 
-没有EM训练、真实地层标签学习或自动命名。truth只保留参考，既不入发射/先验/转移，也不用于参数估计、状态解释或准确率承诺。
+手工登记模型本身不做参数估计。另设独立的联合拟合页，只在分析员显式发起时用多个完整训练孔估计参数（见下节）；truth始终只作参考，既不入发射/先验/转移，也不用于参数估计、状态解释或准确率承诺。
 
 ## 稳定前向后向
 
@@ -59,6 +59,14 @@ CSV列borehole,depth_m,value，truth可选且仅作模拟参考。孔ID为1—30
 
 总MAP分数是路径与连续观测的联合对数密度，不是离散概率。返回log_joint_density；兼容键log_probability表示同一联合对数密度。整路径后验log P(path|观测)通过相对MAP分数减相对观测log密度得到，先抵消公共Gaussian offset，避免两个巨大数相减。UI和CSV明确区分这三种量，未将低似然指数化。
 
+## 多孔联合拟合与整孔留出
+
+人工参数与新测井数据失配时，在“拟合与留出”页选择数据集、源状态模型与至少一个整孔留出，用其余至少两个完整孔联合拟合。每孔独立从同一初始分布起算，共享转移矩阵，孔间不串链；只读取训练孔读数，留出孔读数与truth都不参与参数估计或迭代选择。原配置中精确为0的初始/转移概率保持为0（仍以−∞运算，不加平滑），状态ID与人工名称沿用源模型。
+
+拟合为对数域EM：每轮E步按孔累加前向后向的初始/状态/转移责任与加权平方和，M步重估initial、transition、mean、variance。第0行记录源参数基线训练似然，每步记录训练似然、改进量、状态有效样本量与方差范围；收敛阈值以下、最大迭代、有效样本量趋零、方差低于1e-8或高于1e8、均值越界、不可行路径、数值非有限或训练似然下降时停止，下降/无效的那一步丢弃，保留最后有效参数。没有有效更新则不产生候选，不能登记。
+
+页面并排比较源参数与候选参数，并按整孔列出留出孔的每点对数似然、差值、路径改态与状态计数；训练孔表现单独标注为拟合内表现，不作为泛化证据。候选经分析员确认后登记为一个新的StateModel（revision=1，附provenance：拟合ID、训练/留出孔、源修订、接受迭代数与停止原因、候选参数SHA256）。候选记录保存数据集内容指纹与源模型修订号；上游数据读数变更或源模型修订后，旧候选标记失效并拒绝登记，已有研究仍只读各自锁定的快照。
+
 ## 版本、快照与报告
 
 StateModel修订PATCH递增revision；研究保存完整孔段读数、truth参考、状态ID/人工名称/参数/初始/转移/修订号及源文件的规范JSON SHA256。worker仅读研究快照，后续模型编辑或数据集改名不改旧结果。报告固定引用批准运行及其旧版本；CSV含模型参数、转移、后验、点态/路径、模拟参考与回溯前驱。未批准生成被拒绝，重复决定409。
@@ -71,8 +79,9 @@ StateModel修订PATCH递增revision；研究保存完整孔段读数、truth参�
 | 后端 | Python3.12 / FastAPI / psycopg3 |
 | 核心数值 | Python math自实现logsumexp、前向后向、Viterbi |
 | 异步与数据库 | Redis7.4 / 独立worker / PostgreSQL16 |
+| 参数估计 | Python math自实现对数域EM（多孔联合），无外部优化器 |
 
-81个代码源文件，src内77个职责文件。backend/src含routes/controllers/services/models/schemas/middlewares/utils/constants/config；frontend/src含api/stores/types/components/common/hooks/pages/router/utils/constants。DDL在backend/migrations，advisory lock保护首次建表。科学数值使用Python float双精度并在PostgreSQL JSON文本载荷无显示舍入往返，日志中的−∞用null编码。配套requirements沿用已测依赖，NumPy不是本项目核心算法依赖。
+87个代码源文件，src内83个职责文件。新增em_fit/model_fit服务、路由/控制器、model_fits迁移、FitDetail组件、Fits页与modelFits API。backend/src含routes/controllers/services/models/schemas/middlewares/utils/constants/config；frontend/src含api/stores/types/components/common/hooks/pages/router/utils/constants。DDL在backend/migrations，advisory lock保护首次建表。科学数值使用Python float双精度并在PostgreSQL JSON文本载荷无显示舍入往返，日志中的−∞用null编码。配套requirements沿用已测依赖，NumPy不是本项目核心算法依赖。
 
 Seed固定2409，3孔各160点，配置三态均值/方差与持久转移，含少量模拟测量扰动；truth为模拟生成态，仅参考。SEED_DEMO=true自动seed，失败记日志不阻断，自然键insert-only，重复不新增、不覆盖用户修改。普通SX-01种子两种标签可能完全一致；独立四点反例在验收中明确呈现两种目标差异。
 
@@ -80,7 +89,7 @@ Seed固定2409，3孔各160点，配置三态均值/方差与持久转移，含�
 
 枚举：backend/src/constants/enums.py(Role/RunStatus/ReviewStatus)、domain.py(步长/配额/假设)；frontend/src/constants/enums.ts(角色/状态)。通用共享PageTitle/Notice/StatusBadge，业务共享轨迹/模型矩阵，hooks/useResource/useSession、utils/chart/format。
 
-限制：固定一维高斯和齐次转移假设，不拟合参数，模型失配会造成误导。只处理完整1米孔段，不跨孔、不补缺层；后验是给定模型条件概率，不等于真实岩性确认。浮点极端近同发射仍有有限精度；公共offset和相对分数单独保留。Redis出队强杀不自动重投，JSON载荷无多人乐观锁/迁移回滚。所有真实测试、日志和截图仅在批次test-artifacts/gb-2409。
+限制：固定一维高斯和齐次转移假设；手工模型不拟合参数，只有显式发起的多孔联合拟合会重估参数，模型失配仍可能误导。拟合不保证全局最优，留出孔只用于评价、不参与选择，也不据其回调参数。只处理完整1米孔段，不跨孔、不补缺层；后验是给定模型条件概率，不等于真实岩性确认。浮点极端近同发射仍有有限精度；公共offset和相对分数单独保留。Redis出队强杀不自动重投，JSON载荷无多人乐观锁/迁移回滚。所有真实测试、日志和截图仅在批次test-artifacts/gb-2409。
 
 ## License
 
